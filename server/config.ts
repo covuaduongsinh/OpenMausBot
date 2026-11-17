@@ -414,6 +414,8 @@ const appConfigSchema = z.object({
   browserEngine: browserEngineConfigSchema.optional(),
   browserProfiles: browserProfilesSchema.optional(),
   instances: instanceConfigMapSchema.optional(),
+  /** Optional team identity for self-hosted team mode and Team files. */
+  team: z.object({ id: optionalText, name: optionalText }).optional(),
   /** Loose on purpose: one bad server entry is skipped later, never fails the whole file. */
   mcpServers: z.record(z.string(), z.unknown()).optional(),
 });
@@ -433,6 +435,7 @@ const jsonObjectSchema = z.record(z.string(), z.json());
 
 export interface AppConfig extends HelperConfig {
   customDomain?: string;
+  team?: { id?: string; name?: string };
   signIn?: { admins?: string[]; members?: string[] };
   /** Preferred selection for newly created bots; existing bots keep theirs. */
   defaultModelSelection?: ModelSelection;
@@ -770,6 +773,12 @@ export function loadConfig(): AppConfig {
   if (process.env.OMB_GEMINI_IMAGE_KEY !== undefined) cfg.imageGen.geminiKey = process.env.OMB_GEMINI_IMAGE_KEY;
   const signInEnv = signInFromEnv();
   if (signInEnv.admins || signInEnv.members) cfg.signIn = { ...cfg.signIn, ...signInEnv };
+  if (process.env.OMB_TEAM_NAME !== undefined) {
+    cfg.team = {
+      id: process.env.OMB_TEAM_ID ?? cfg.team?.id,
+      name: process.env.OMB_TEAM_NAME,
+    };
+  }
   return cfg;
 }
 
