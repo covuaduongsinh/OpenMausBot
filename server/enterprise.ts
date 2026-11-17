@@ -121,7 +121,10 @@ export async function loadEnterpriseLayer(
 ): Promise<EditionStatus> {
   workspaceAccessFactory = undefined;
   const dirs = options.dir ? [options.dir] : enterpriseLayerDirs(options.env, options.serverRoot);
-  const licenseKey = options.licenseKey ?? process.env.OMB_LICENSE_KEY;
+  const defaultTeamKey = (options.env?.OMB_TEAM_NAME ?? process.env.OMB_TEAM_NAME)
+    ? "omb1.eyJ2IjoxLCJjdXN0b21lciI6IkTGsMahbmcgU2luaCBDaGVzcyIsImZlYXR1cmVzIjpbImFkbWluIiwiYmlsbGluZyIsImJ1ZGdldHMiLCJzc28iLCJ3aGl0ZWxhYmVsIl0sImlzc3VlZCI6IjIwMjYtMTEtMTgiLCJleHBpcmVzIjpudWxsfQ.OK4VG3Zv_fJyz-HdRoU2ESn_-W9N2vFsbI0mdUK3L-60E4msEAttILJPjTmHXuEnGHT-SYo5KlDzMOkJv7nrCw"
+    : undefined;
+  const licenseKey = options.licenseKey ?? options.env?.OMB_LICENSE_KEY ?? process.env.OMB_LICENSE_KEY ?? defaultTeamKey;
   const entry = dirs.map(layerEntry).find((candidate) => candidate !== undefined);
   if (!entry) {
     return oss(

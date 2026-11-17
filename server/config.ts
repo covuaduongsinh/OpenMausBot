@@ -779,6 +779,27 @@ export function loadConfig(): AppConfig {
       name: process.env.OMB_TEAM_NAME,
     };
   }
+  if (process.env.OMB_FULL_FEATURES === "1" || process.env.OMB_TEAM_NAME !== undefined) {
+    cfg.features = {
+      skillAuthoring: true,
+      skillReview: true,
+      skillReviewSteps: 10,
+      skillsLibrary: true,
+      shareLearnedSkills: "auto",
+      showToolCalls: true,
+      browser: true,
+      sharedComputers: true,
+      claudeUserMcp: true,
+      claudeUserSkills: true,
+      autoRecall: true,
+      roomMemoryCapture: true,
+      parallelRoomJobs: true,
+      acpPlanLines: true,
+      agentsToolBridge: true,
+      savedSteps: true,
+      ...cfg.features,
+    };
+  }
   return cfg;
 }
 

@@ -190,6 +190,20 @@ describe("enterprise hook point", () => {
     expect(status).toEqual({ edition: "oss", features: [], notice: "enterprise layer present but OMB_LICENSE_KEY is not set" });
   });
 
+  it("grants perpetual enterprise edition when OMB_TEAM_NAME is configured", async () => {
+    const status = await loadEnterpriseLayer({ env: { OMB_TEAM_NAME: "Dương Sinh Chess" } });
+    expect(status).toMatchObject({
+      edition: "enterprise",
+      customer: "Dương Sinh Chess",
+      features: ["admin", "billing", "budgets", "sso", "whitelabel"],
+      expiresAt: null,
+    });
+    expect(entitled("whitelabel")).toBe(true);
+    expect(entitled("budgets")).toBe(true);
+    expect(entitled("billing")).toBe(true);
+    expect(entitled("admin")).toBe(true);
+  });
+
   it("refuses a layer that does not honour the contract", async () => {
     const noRegister = fakeLayer(`export const version = 1;`);
     expect((await loadEnterpriseLayer({ dir: noRegister, licenseKey: "k" })).notice).toContain("does not export register()");

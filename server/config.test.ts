@@ -2471,4 +2471,15 @@ describe("a key the desktop app hands the server as an environment variable", ()
     vi.stubEnv(variable, `fixture-${variable}`);
     expect(instanceConfigs(loadConfig())[instanceId]?.environment?.[engineEnv]).toBe(`fixture-${variable}`);
   });
+
+  it("unlocks full team features when OMB_TEAM_NAME or OMB_FULL_FEATURES is set", () => {
+    vi.stubEnv("OMB_TEAM_NAME", "Dương Sinh Chess");
+    const cfg = loadConfig();
+    expect(cfg.team?.name).toBe("Dương Sinh Chess");
+    expect(cfg.features?.skillsLibrary).toBe(true);
+    expect(cfg.features?.roomMemoryCapture).toBe(true);
+    expect(cfg.features?.showToolCalls).toBe(true);
+    expect(cfg.features?.agentsToolBridge).toBe(true);
+    expect(cfg.features?.sharedComputers).toBe(true);
+  });
 });

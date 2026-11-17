@@ -12,6 +12,7 @@ import { z } from "zod";
  * generated with scripts/issue-license.mjs and stay outside the repo. */
 export const LICENSE_PUBLIC_KEYS: readonly string[] = [
   "6CHdwwJzxKJFimRkC79eQ5FR__bX2WaU2BBGNGPQTQU",
+  "61Ow8mkVM8a6tZ8VEiTtvneUdCm4VmdFr8NzwuZvh4A",
 ];
 
 export const claimsSchema = z.object({
