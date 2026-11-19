@@ -180,7 +180,14 @@ export interface ConfigStatus {
   cloudHome?: boolean;
   /** A Team Cloud: the team this server is the home of, and the Plan page (MausBot Cloud) where its people and plan
    * are managed. Absent everywhere else. */
-  team?: { id: string; name: string; cloudPage?: string };
+  team?: {
+    id: string;
+    name: string;
+    cloudPage?: string;
+    /** A team named in this server's own config, not a Team Cloud: it has Team files, and no private chats, per-person
+     * bot access or shared-chat marks, so the app lists every conversation as it does off a team. */
+    selfHosted?: true;
+  };
 }
 
 export interface ManagedPolicySummary {

@@ -95,6 +95,13 @@ export function teamOfConfig(config: unknown): { id: string } | null {
   return typeof team?.id === "string" && team.id ? { id: team.id } : null;
 }
 
+/** The team whose server keeps each person's private chats apart from the team's: a Team Cloud's. A self-hosted team's
+ * server sends every conversation unmarked, so none of them belongs to a side. */
+export function privateChatsTeamOfConfig(config: unknown): { id: string } | null {
+  const selfHosted = (config as { team?: { selfHosted?: unknown } } | null | undefined)?.team?.selfHosted === true;
+  return selfHosted ? null : teamOfConfig(config);
+}
+
 const chatsOf = (teamId: string, session: { scopes: string[]; openedThreads?: string[]; email?: string }): TeamChats =>
   ({ teamId, member: !session.scopes.includes("admin"), opened: session.openedThreads ?? [], ...(session.email?.trim() ? { person: session.email.trim().toLowerCase() } : {}) });
 
@@ -110,7 +117,7 @@ export function rereadTeamChats(): void {
 /** Keeps the sidebar's rule in step with the page's server: on a team, the person's own conversations; a Member until
  * the session says otherwise is never assumed (an Admin's rule is the safe one). */
 export function useTeamChats(config: unknown) {
-  const teamId = teamOfConfig(config)?.id ?? null;
+  const teamId = privateChatsTeamOfConfig(config)?.id ?? null;
   useEffect(() => {
     if (!teamId) { setTeamChats(null); return; }
     setTeamChats({ teamId, member: false });

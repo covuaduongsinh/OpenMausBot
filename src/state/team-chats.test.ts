@@ -10,7 +10,7 @@ vi.mock("./api", () => ({
 }));
 
 import { openBot } from "./thread-navigation";
-import { openOwnTeamChat, ownChatOf, setTeamChats } from "./team-chats";
+import { openOwnTeamChat, ownChatOf, privateChatsTeamOfConfig, setTeamChats, teamOfConfig } from "./team-chats";
 
 const MEMBER = { teamId: "team-acme", member: true }, ADMIN = { teamId: "team-acme", member: false };
 const scout = (tasks: Array<Record<string, unknown>>) => ({ id: "scout", threadId: "scout-main", mainThreadId: "scout-main", tasks: [{ threadId: "scout-main", createdAt: 1 }, ...tasks] as never });
@@ -20,6 +20,14 @@ const stored = new Map<string, string>();
 const localStorage = { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => { stored.set(key, value); } };
 beforeEach(() => { vi.stubGlobal("localStorage", localStorage); stored.clear(); server.calls.length = 0; server.answer = null; server.fail = null; });
 afterEach(() => { setTeamChats(null); vi.unstubAllGlobals(); });
+
+it("keeps private chats apart only on a Team Cloud: a self-hosted team is still a team, with every conversation listed as ever", () => {
+  const cloud = { team: { id: "team-acme", name: "Acme" } }, selfHosted = { team: { id: "team-main", name: "Acme", selfHosted: true } };
+  expect(privateChatsTeamOfConfig(cloud)).toEqual({ id: "team-acme" });
+  expect(privateChatsTeamOfConfig(selfHosted), "its server marks no conversation private or shared").toBeNull();
+  expect(teamOfConfig(selfHosted)).toEqual({ id: "team-main" });
+  expect(privateChatsTeamOfConfig({})).toBeNull();
+});
 
 it("a Member's click opens their own newest conversation with the bot, never the team's main chat, a routine's report, a bot's thread or a closed one", () => {
   const bot = scout([
