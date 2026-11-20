@@ -11,7 +11,7 @@ import {
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { CALL_MODES, effectiveCallMode, useCallMode } from "@/lib/call-mode";
 import { callCapabilityHelp } from "@/lib/call-capability";
-import { fishListeningReady, listensHere, speechBridge } from "@/lib/speech";
+import { listensHere, missingListenKey, speechBridge } from "@/lib/speech";
 import { requestCallStart } from "@/lib/call-start-request";
 import { useOnCall } from "@/lib/call";
 import { isLiveCallRunning, useLiveMedia } from "@/lib/live-call-media";
@@ -133,7 +133,7 @@ export function TeachTaskButton({ onClick }: { onClick: () => void }) {
       title={t("composer.teachTask")}
       className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink"
     >
-      <GraduationCap size={16} strokeWidth={1.75} absoluteStrokeWidth />
+      <GraduationCap size={16} />
     </button>
   );
 }
@@ -188,7 +188,7 @@ export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, e
   const media = useLiveMedia();
   const turnsHere = !ready || listensHere(capabilities, state.config);
   const callMode = effectiveCallMode(storedMode, { turnsHere, canLive: true });
-  const turnsHelp = turnsHere ? null : callCapabilityHelp(capabilities, Boolean(speechBridge()?.speechStart), fishListeningReady(state.config));
+  const turnsHelp = turnsHere ? null : callCapabilityHelp(capabilities, Boolean(speechBridge(state.config)?.speechStart), missingListenKey(capabilities, state.config));
   // As the call button, which hides while Live is the mode and its line is held on another device.
   const lineHeldElsewhere = callMode === "live" && liveLineHeldElsewhere(media, state.liveCall);
   const calling = callBotId !== undefined && (onCall === callBotId || isLiveCallRunning(media.phase) || lineHeldElsewhere);
@@ -235,7 +235,7 @@ export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, e
     </span>
   ) : (
     <span data-composer-plus className={cn("flex items-center justify-center transition-colors", SIMPLE_CONTROL, open && "bg-ink/[0.09] text-ink")}>
-      <Plus size={20} strokeWidth={1.75} absoluteStrokeWidth aria-hidden="true" />
+      <Plus size={16} aria-hidden="true" />
     </span>
   );
   if (!circle && items.length === 1) {
@@ -336,9 +336,9 @@ function ComposerMenu({ items, renderTrigger }: { items: SidebarMenuItem[]; rend
                 close(false);
                 item.onSelect();
               }}
-              className="flex h-[34px] w-full items-center gap-2 rounded-[8px] px-3 text-start text-[15px] text-ink transition-colors hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:outline-none disabled:opacity-50"
+              className="flex h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-[14px] leading-5 text-ink transition-colors hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:outline-none disabled:opacity-50"
             >
-              <span className={cn("flex size-3.5 shrink-0 items-center justify-center [&_svg]:size-3.5 [&_svg]:stroke-[1.5]", item.active ? "text-accent" : "text-ink-secondary")} aria-hidden="true">{item.icon}</span>
+              <span className={cn("flex size-4 shrink-0 items-center justify-center [&_svg]:size-4", item.active ? "text-accent" : "text-ink-secondary")} aria-hidden="true">{item.icon}</span>
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
               {item.trailing}
             </button>

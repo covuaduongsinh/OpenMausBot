@@ -40,9 +40,11 @@ import { sameModelSelection } from "../shared/thread-model.ts";
 import { initialGreetingMessage } from "./initial-greeting.ts"; import { createDefaultBot, defaultBotRefusal, type DefaultBotIntro } from "./default-bot.ts";
 import { appsFromCreator } from "./inherited-apps.ts"; import { newBotOwner, sharedAsMaker, sharedUnlessRestricted, type NewBotSharingRule } from "./new-bot-sharing.ts";
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
+import { lastMessageId, messagesBefore } from "./thread-history.ts";
 import { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
 import { buildTask, threadTitleFrom, UNTITLED_THREAD } from "./task-record.ts";
 import { createBotFork, createGroupFork } from "./store-forks.ts";
+import { createThreadBotIndex } from "./thread-bot-index.ts";
 import { activeGroupTask, groupTaskByThread, groupTasks, migrateGroupTaskRead, mirrorActiveGroupTask, refreshGroupUnread, setGroupTaskRead, syncGroupReadPatch } from "./group-task-state.ts";
 export { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
 export { threadTitleFrom, UNTITLED_THREAD } from "./task-record.ts";
@@ -319,7 +321,7 @@ export class Store {
         botsMigrated = true;
       }
       if (!existsSync(soulFile(b.id))) {
-        try { writeSoulMirror(b.id, b.soul); } catch (e) {
+        try { writeSoulMirror(b.id, b.soul, false); } catch (e) {
           console.warn(`[bot-folder] could not create SOUL.md for ${b.id}: ${(e as Error).message}`);
         }
       }
@@ -1075,21 +1077,20 @@ export class Store {
     return this.thread(threadId).messages;
   }
 
+  messagesBefore(threadId: string, before: string, limit: number) {
+    return messagesBefore(threadId, before, limit, this.threads.get(threadId), () => this.thread(threadId));
+  }
+
   /** Legacy rows without a parentId chain only on a full load, so a bounded page missing that context falls back to one. */
   messagesTail(threadId: string, limit: number): { messages: Message[]; hasMore: boolean; activeLeafId: string | null } {
     let state = this.threads.get(threadId);
     if (!state) {
       const tail = mdb.readThreadTail(threadId, messagesFile(threadId), limit);
       const legacyRows = tail.hasMore !== undefined && tail.messages.some((m) => m.parentId === undefined);
-      if (tail.hasMore !== true || legacyRows) {
-        state = this.threads.load(threadId, legacyRows ? mdb.readThread(threadId, messagesFile(threadId)) : tail);
-      } else {
-        return {
-          messages: tail.messages,
-          hasMore: tail.hasMore,
-          activeLeafId: tail.activeLeafId ?? tail.messages.at(-1)?.id ?? null,
-        };
+      if (tail.hasMore === true && !legacyRows) {
+        return { messages: tail.messages, hasMore: true, activeLeafId: tail.activeLeafId || (tail.messages.at(-1)?.id ?? lastMessageId(threadId)) };
       }
+      state = this.threads.load(threadId, legacyRows ? mdb.readThread(threadId, messagesFile(threadId)) : tail);
     }
     const { messages, activeLeafId } = state;
     const start = Math.max(0, messages.length - limit);
@@ -1260,9 +1261,8 @@ export class Store {
     return this.bots.find((b) => b.id === id) ?? this.standIns.get(id) ?? null; } /** One of this place's own bots. Every method that changes a bot looks here and never among the stand-ins: a record with `home` is read-only on this place. */ private own(id: string) { return this.bots.find((b) => b.id === id) ?? null;
   }
 
-  botByThread(threadId: string) {
-    return this.bots.find((b) => b.threadId === threadId || b.tasks?.some((t) => t.threadId === threadId)) ?? null;
-  }
+  private readonly threadBots = createThreadBotIndex<BotRecord>();
+  botByThread(threadId: string): BotRecord | null { return this.threadBots.find(this.bots, threadId); }
 
   private newBotSelection(requested?: ModelSelection): ModelSelection {
     return this.completeNewBotSelection(requested ?? this.defaultSelection());
@@ -1276,7 +1276,8 @@ export class Store {
       >
     > = {},
     opts: {
-      seedMessages?: boolean; id?: string; threadId?: string; beforeShown?: (bot: BotRecord) => void;
+      /** `settle` finishes the new bot's record (patchBot and the like) before its one save; a throw leaves no bot behind. */
+      seedMessages?: boolean; id?: string; threadId?: string; beforeShown?: (bot: BotRecord) => void; settle?: (bot: BotRecord) => void;
     } = {},
   ): BotRecord {
     const toolScope = parseToolScope(profile.toolScope);
@@ -1311,24 +1312,23 @@ export class Store {
       threadId: bot.threadId,
       title: UNTITLED_THREAD,
       createdAt: bot.createdAt,
-      updatedAt: bot.createdAt,
+      updatedAt: bot.createdAt, ...(opts.seedMessages !== false ? { lastThreadOrderAt: bot.createdAt } : {}),
       resumeCursors: {},
       unread: false,
       activity: "idle",
       busy: false,
     }];
     // Persist before publishing or greeting, so an interrupted creation cannot inherit tools.
-    this.saveBots([bot, ...this.bots]);
-    this.bots.unshift(bot);
-    try {
-      writeSoulMirror(bot.id, bot.soul ?? "");
-    } catch (e) {
-      console.warn(`[bot-folder] could not write SOUL.md mirror for ${bot.id}: ${(e as Error).message}`);
+    try { this.bots.unshift(bot); opts.settle?.(bot); this.saveBots(); } catch (error) {
+      const at = this.bots.findIndex((made) => made.id === bot.id); if (at >= 0) this.bots.splice(at, 1);
+      if (opts.settle) try { this.saveBots(); } catch { console.warn(`store: bot ${bot.id} was not finished and may reappear on restart`); } finally { this.emit({ type: "bot.deleted", botId: bot.id }); }
+      throw error;
     }
+    try { writeSoulMirror(bot.id, bot.soul ?? "", false); } catch (e) { console.warn(`[bot-folder] could not write SOUL.md mirror for ${bot.id}: ${(e as Error).message}`); }
     // Before its transcript: clients need the bot/thread mapping to place either message.
     opts.beforeShown?.(bot); this.emit({ type: "bot", botId: bot.id });
     if (opts.seedMessages !== false) {
-      this.appendMessage(bot.threadId, initialGreetingMessage(name, this.initialLanguage, !bot.soul?.trim() && !bot.description.trim(), this.personName()));
+      this.appendMessage(bot.threadId, { ...initialGreetingMessage(name, this.initialLanguage, !bot.soul?.trim() && !bot.description.trim(), this.personName()), at: bot.createdAt });
     }
     return bot;
   }
@@ -1369,7 +1369,7 @@ export class Store {
         if (operation.fields.modelSelection) next.tasks = this.withDefaultModel(previous, operation.fields.modelSelection);
         nextBots[at] = next;
       }
-      if (operation.fields.chiefOfStaff === false) delete next.managedSections;
+      if (operation.fields.chiefOfStaff === false) delete next.managedSections; if (!Array.isArray(next.mcpServers)) delete next.mcpServers; // Undo's "every enabled server"
       next.section = sectionKey(next.section) || undefined;
       if (operation.fields.soul !== undefined) { next.soulHash = soulHash(operation.fields.soul); next.soulDrift = false; }
       changed.push(next);

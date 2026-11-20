@@ -49,6 +49,7 @@ let assignmentStatusCode = 200;
 let lastThreadBody: any = null;
 let threadCalls = 0;
 let threadsList: unknown = { threads: [] };
+let lastThreadsUrl = "";
 let threadResponse: unknown = { threadId: "thread-new", title: "QA: PR #1", botId: "bot-asker", botName: "Asker", self: true, state: "running", limit: 3 };
 let computerRequests: { method: string; url: string; body: unknown }[] = [];
 let computerResponse: unknown = { current: "local", available: ["local", "vm"] };
@@ -269,6 +270,7 @@ beforeAll(async () => {
       return;
     }
     if (req.method === "GET" && req.url?.startsWith("/api/internal/threads?")) {
+      lastThreadsUrl = req.url;
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(threadsList));
       return;
@@ -512,7 +514,9 @@ describe("agents-proxy MCP surface", () => {
         expect(description).toContain("Only a pending result requires ending the turn");
       } else {
         expect(description).toContain("It applies at once, with an Undo where possible: read the result before saying it did.");
-        expect(description).toContain("It never raises another bot's execution permissions.");
+        // A Chief's team setup may set a bot's MCP servers, so it names that instead.
+        if (tool === "propose_team_setup") expect(description).toContain("mcpServers sets an existing bot's MCP servers; no other execution permission changes.");
+        else expect(description).toContain("It never raises another bot's execution permissions.");
       }
     }
     const credential = list.result.tools.find((entry: { name: string }) => entry.name === "request_credential");
@@ -679,6 +683,7 @@ describe("agents-proxy MCP surface", () => {
       "wait_until",
       "list_waits",
       "cancel_wait",
+      "check_back",
       "propose_profile",
       "propose_model",
       "propose_team_memory",
@@ -985,6 +990,30 @@ describe("agents-proxy MCP surface", () => {
     expect(start.description).toContain('use coordinate_bots for teammates (thread "new" opens a fresh thread on them)');
     expect(start.description).toContain("do not retry it");
     expect(start.description).not.toMatch(/\b(delegate_bot|ask_bot)\b/);
+  });
+
+  it.each(["bot", "botId", "toBotId", "bot_ids", "reportBack"])("start_thread refuses unknown %s before creating a task", async (key) => {
+    const before = threadCalls;
+    const res = await callTool("start_thread", { title: "Review", message: "Review the patch.", [key]: "Helper" });
+    expect(res.result.isError).toBe(true);
+    expect(res.result.content[0].text).toContain(`unknown arguments "${key}"`);
+    expect(res.result.content[0].text).toContain("coordinate_bots with bot_ids from list_bots");
+    expect(threadCalls).toBe(before);
+  });
+
+  it.each([null, "", "   ", 42, ["bot-helper"], { id: "bot-helper" }])("start_thread refuses an invalid legacy bot_id %j instead of falling back to itself", async (bot_id) => {
+    const before = threadCalls;
+    const res = await callTool("start_thread", { title: "Review", message: "Review the patch.", bot_id });
+    expect(res.result.isError).toBe(true);
+    expect(res.result.content[0].text).toContain("bot_id must be a non-empty bot ID");
+    expect(threadCalls).toBe(before);
+  });
+
+  it("start_thread does not ignore a conflicting recipient alias beside a valid legacy bot_id", async () => {
+    const before = threadCalls;
+    const res = await callTool("start_thread", { title: "Review", message: "Review the patch.", bot_id: "bot-helper", bot: "Another helper" });
+    expect(res.result.isError).toBe(true);
+    expect(threadCalls).toBe(before);
   });
 
   it("start_thread on a teammate is a hand-off into a fresh thread: the receipt's thread and assignment id, no deprecation line", async () => {
@@ -1311,6 +1340,24 @@ describe("agents-proxy MCP surface", () => {
       expect((await callTool("list_threads", {})).result.content[0].text).toContain(`#Export CSV (on @Ops, queued: ${waiting}) [thread id: t-q] [delegation id: asg-q]`);
     } finally {
       assignmentStatusResponse = DONE_ASSIGNMENT;
+      threadsList = { threads: [] };
+    }
+  });
+
+  it("list_threads names the next page when more threads are left, and asks for the page it is given", async () => {
+    const row = { threadId: "t-1", botId: "bot-a", botName: "A", title: "Event 1", state: "idle", own: true, unread: false, openedAt: 1 };
+    threadsList = { threads: [row], total: 101, page: 1, pageSize: 100 };
+    try {
+      expect((await callTool("list_threads", {})).result.content[0].text).toContain("Showing 1-1 of 101. For older ones call list_threads with page 2.");
+      threadsList = { threads: [row], total: 101, page: 2, pageSize: 100 };
+      const last = (await callTool("list_threads", { page: 2 })).result.content[0].text;
+      expect(new URL(lastThreadsUrl, "http://x").searchParams.get("page")).toBe("2");
+      expect(last).toContain("#Event 1");
+      expect(last).not.toContain("Showing");
+      threadsList = { threads: [], total: 101, page: 3, pageSize: 100 };
+      expect((await callTool("list_threads", { page: 3 })).result.content[0].text).toBe("No threads on page 3: there are 101, 100 to a page.");
+      expect((await callTool("list_threads", { page: 0 })).result.content[0].text).toContain("was not run");
+    } finally {
       threadsList = { threads: [] };
     }
   });

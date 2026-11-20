@@ -41,10 +41,12 @@ import type { SharedComputers } from "../shared-computers.ts";
 import { parseSkillMd } from "../skills.ts";
 import type { Store } from "../store.ts";
 import * as tts from "../tts/index.ts";
+import { DEFAULT_DEEPSEEK_VOICE } from "../../shared/deepseek-voice.ts";
 import * as vps from "../vps-computer.ts";
 import { refusalBody, userError, userErrorFields } from "../user-errors.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
 import type { Postiz } from "../postiz/service.ts";
+import { patchMayChangeEngineStatus } from "./config-engine-effect.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface BusyFlag {
@@ -194,7 +196,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         && patch.tts.provider !== tts.voiceProvider(cfg);
       if (changingVoiceProvider && patch.tts?.voice === undefined) {
         // Voice ids are provider-owned: never carry one from one catalog into another.
-        patch.tts = { ...patch.tts, voice: "" };
+        patch.tts = { ...patch.tts, voice: patch.tts?.provider === "deepseek" ? DEFAULT_DEEPSEEK_VOICE : "" };
       }
       if (changingVoiceProvider && patch.tts?.model === undefined) patch.tts = { ...patch.tts, model: "" };
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
@@ -606,7 +608,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       localVmModeChanged?.();
       postiz?.configSaved(patch);
       // A saved key reaches an engine through the environment its status read uses, often with no reload.
-      registry.forgetSnapshots();
+      if (patchMayChangeEngineStatus(patch)) registry.forgetSnapshots();
       if (patch.localVm?.idleTimeoutMinutes !== undefined) {
         for (const idle of localVmIdles.values()) idle.setIdleMs(localVmIdleMs());
       }
