@@ -7,7 +7,7 @@ import { t } from "@/lib/i18n";
 import { productName } from "@/lib/brand";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { SIMPLE_ONLY } from "@/lib/simple-only";
-import { useStore } from "@/state/store";
+import { useStoreSelector } from "@/state/store-select";
 import { InitialsAvatar } from "../Avatar";
 import { PlaceMark } from "../PlacesRail";
 import { profileInitials } from "../SidebarProfileMenu";
@@ -56,11 +56,10 @@ export function YouAvatar({ size }: { size: number }) {
 
 /** The place's one status line under its name: bots on This computer, power on a Cloud. */
 export function usePlaceSubLine(place: SettingsPlace): string {
-  const { state } = useStore();
+  const count = useStoreSelector((state) => (place.kind === "computer" ? state.bots.length : 0));
   const update = useUpdaterState();
   if (update?.status === "downloaded" && place.kind === "computer") return t("sidebar.update.readyShort");
   if (place.kind === "computer") {
-    const count = state.bots.length;
     return count === 0 ? t("settings.place.botsNone") : count === 1 ? t("settings.place.botsOne") : t("settings.place.botsMany", { count });
   }
   return place.kind === "server" ? t("settings.place.running") : t("settings.place.alwaysOn");
@@ -191,8 +190,8 @@ export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, 
     account: { badge: <YouAvatar size={24} />, name: t("settings.page.account"), line: accountLine(account, { browser: !ctx.desktop, place: place.name, openSource }), page: "account" },
     app: { badge: <AppIcon size={24} />, name: ctx.desktop ? t("settings.page.app") : t("settings.page.browser"), line: appLine, page: "app" },
   };
-  const dot = (page: SettingsPageId) => page === "phone" && phone.kind === "paired" && phone.connected ? "success" as const
-    : page === "phone" && phone.kind === "attention" ? "warning" as const : null;
+  const dot = (page: SettingsPageId) => page === "devices" && phone.kind === "paired" && phone.connected ? "success" as const
+    : page === "devices" && phone.kind === "attention" ? "warning" as const : null;
   const searching = query.trim() !== "";
   return (
     <nav aria-label={t("settings.title")} className={cn("flex min-h-0 flex-col", narrow ? "flex-1" : "w-[220px] shrink-0 shadow-[inset_-0.5px_0_0_var(--settings-edge)]")}>
@@ -321,17 +320,17 @@ function HitRow({ ctx, place, hit, query, onHit }: { ctx: SettingsContext; place
 }
 
 const PAGE_OWNER: Record<SettingsPageId, SettingsOwner> = {
-  overview: "place", phone: "place", ai: "place", bots: "place", desktops: "place", vault: "place", usage: "place", transfer: "place", data: "place",
-  people: "place", installations: "place", account: "account", plan: "account", app: "app", general: "app", appearance: "app",
+  overview: "place", devices: "place", ai: "place", bots: "place", desktops: "place", vault: "place", usage: "place", transfer: "place", storage: "place",
+  data: "place", people: "place", installations: "place", account: "account", plan: "account", app: "app", general: "app", appearance: "app", features: "place",
 };
 
 const PAGE_KEY: Partial<Record<SettingsPageId, Parameters<typeof t>[0]>> = {
-  phone: "settings.section.phoneDevices", ai: "settings.group.ai", bots: "settings.page.bots", desktops: "settings.page.desktops",
-  vault: "settings.section.vault", usage: "settings.page.spending", transfer: "settings.page.importExport", data: "settings.page.data", people: "settings.section.people",
-  installations: "settings.section.workspaces", plan: "settings.page.plan", general: "settings.section.general", appearance: "settings.section.appearance",
+  devices: "settings.page.devices", ai: "settings.group.ai", bots: "settings.page.bots", desktops: "settings.page.desktops",
+  vault: "settings.section.vault", usage: "settings.page.spending", transfer: "settings.page.importExport", storage: "settings.page.storage", data: "settings.page.data", people: "settings.section.people",
+  installations: "settings.section.workspaces", plan: "settings.page.plan", general: "settings.section.general", appearance: "settings.section.appearance", features: "settings.page.features",
 };
 
-/** A result's second line: its owner and its page ("This computer › Phone & devices"), or what a jump opens. */
+/** A result's second line: its owner and its page ("This computer › Devices"), or what a jump opens. */
 export function searchWhere(hit: SearchHit, place: SettingsPlace, ctx: SettingsContext): { owner: string; page?: string } | null {
   const entry = hit.entry;
   if (entry.jump) return { owner: searchLocation(hit, place, ctx) };
@@ -342,7 +341,7 @@ export function searchWhere(hit: SearchHit, place: SettingsPlace, ctx: SettingsC
   return { owner: ownerName, ...(pageKey && !entry.id.startsWith("page:") ? { page: t(pageKey) } : {}) };
 }
 
-/** The full path, owner first ("This computer › Phone & devices › How your phone reaches this computer"): the tooltip. */
+/** The full path, owner first ("This computer › Devices › How your phone reaches this computer"): the tooltip. */
 export function searchLocation(hit: SearchHit, place: SettingsPlace, ctx: SettingsContext): string {
   const entry = hit.entry;
   if (entry.jump === "apps") return t("settings.search.opensApps");

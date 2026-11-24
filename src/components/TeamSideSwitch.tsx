@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { Lock, Users } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { hiddenFromSidebar } from "@/lib/default-bot";
 import { t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { openBot, useStore, type AppState, type Bot, type Group } from "@/state/store";
 import { listedSide, setTeamSide, showTeamSide, sideOfThread, teamSide, teamSideView, useTeamSide, type TeamSide } from "@/state/team-side";
+import { useStoreSelector } from "@/state/store-select";
 import { markTeamPrivateChatsLineSaid, sharedChatAudience } from "./TeamPrivateChatsLine";
 
 const SIDES = [{ side: "me", label: "teamSide.me", Icon: Lock }, { side: "team", label: "teamSide.team", Icon: Users }] as const;
@@ -31,9 +33,9 @@ export function useTeamSideLists(state: Pick<AppState, "bots" | "groups" | "conf
 
 /** The side the conversation a bot has on screen is listed on, on a team's Cloud; null anywhere else. */
 export function useConversationSide(bot: Bot): TeamSide | null {
-  const { state } = useStore();
+  const onTeam = useStoreSelector((state) => Boolean(state.config?.team));
   const { team } = useTeamSide();
-  return state.config?.team && team ? listedSide(bot, bot.threadId) : null;
+  return onTeam && team ? listedSide(bot, bot.threadId) : null;
 }
 
 function hintDue(teamId: string): boolean {
@@ -72,7 +74,7 @@ export function TeamSideSwitch({ compact, listOnly = false }: { compact: boolean
     if (listOnly || state.activeView !== "chat") return;
     const there = teamSideView(state.bots, state.groups, team, next);
     if (there.groups.some((group) => group.id === state.selectedId)) return;
-    const target = there.bots.find((bot) => bot.id === state.selectedId) ?? there.bots.find((bot) => !bot.sidebarHidden);
+    const target = there.bots.find((bot) => bot.id === state.selectedId) ?? there.bots.find((bot) => !hiddenFromSidebar(bot, team.person));
     const bot = target && state.bots.find((candidate) => candidate.id === target.id);
     if (bot) openBot(dispatch, bot, showThreads);
     else if (there.groups[0]) dispatch({ type: "select", id: there.groups[0].id });
@@ -144,7 +146,7 @@ export function TeamAudienceLabel({ bot, group }: { bot?: Bot; group?: Group }) 
     if (group || movedHere || askedFor || (justMade && side === "me")) { setTeamSide(side, team); return; }
     const lists = teamSideView(state.bots, state.groups, team, showing);
     const there = lists.switchable ? lists.bots : [];
-    const target = there.find((candidate) => candidate.id === chat) ?? there.find((candidate) => !candidate.sidebarHidden);
+    const target = there.find((candidate) => candidate.id === chat) ?? there.find((candidate) => !hiddenFromSidebar(candidate, person));
     const landing = target && state.bots.find((candidate) => candidate.id === target.id);
     if (landing) openBot(dispatch, landing, showThreads);
     else showTeamSide(side, team);

@@ -520,6 +520,17 @@ describe("Boat's credit offer", () => {
     await endedForGood();
   });
 
+  it("shows Boat's address for manual opening and keeps the offer available if the browser fails", async () => {
+    fresh(); await launch();
+    vi.mocked(window.ogb!.openExternal!).mockRejectedValueOnce(new Error("no browser"));
+    press("Get Boat"); await flush();
+    const after = render();
+    expect(after).toMatch(/role="alert"[^>]*>[^<]*<span[^>]*>https:\/\/boat\.dev<\/span>/);
+    expect(storage.get(BOAT_OFFER_NOTICE)).toBeUndefined();
+    press("Get Boat"); await flush();
+    await endedForGood();
+  });
+
   it("the claim opens an email to Boat's billing address with Boat's subject and body for the person to send, and ends it for good; nothing is sent for them", async () => {
     fresh(); await launch();
     vi.mocked(api).mockClear();
@@ -1270,6 +1281,7 @@ describe("bots in two places", () => {
     expect(accepted, "one tap never moves anyone").toEqual([]);
     expect(asking).toContain("Move this computer&#x27;s bots to Garage server?");
     expect(asking, "the undo switch is My Cloud's only").not.toContain("Keep this computer&#x27;s bots on this computer");
+    expect(asking, "only My Cloud is sure to keep using this computer").not.toContain("when you type on it");
     press("Move bots");
     await flush();
     expect(accepted).toEqual([GARAGE.key]);
@@ -1285,6 +1297,7 @@ describe("bots in two places", () => {
     const asking = await settle();
     expect(asking).toContain("Move this computer&#x27;s bots to My Cloud?");
     expect(asking, "My Cloud names the way back").toContain("Keep this computer&#x27;s bots on this computer");
+    expect(asking, "the move keeps this computer in use, unless lending is paused").toContain("Bots on My Cloud still use this computer when you type on it, unless you pause that in the OpenMausBot icon&#x27;s menu.");
     press("Cancel");
     const after = await settle();
     expect(accepted).toEqual([]);
@@ -1719,7 +1732,7 @@ describe("Update MausBot on your phone", () => {
   const OTHER = { ...OLD, id: "7c7c7c7c-1111-4222-8333-444455556666", name: "Old Android" };
   let devices: unknown[], retired: boolean;
   let companion: ReturnType<typeof vi.fn>, linked: ReturnType<typeof vi.fn>;
-  /** This computer's phone link and its account, as Settings → Phone & devices reads them through the same two bridges. */
+  /** This computer's phone link and its account, as Settings → Devices reads them through the same two bridges. */
   const bridgesOn = () => {
     companion = vi.fn(async () => ({ enabled: true, keepAwake: false, port: 1, devices, pairing: null }));
     linked = vi.fn(async () => ({ available: true, status: "ready", ...(retired ? { tunnelRetired: true } : {}) }));
@@ -1727,19 +1740,19 @@ describe("Update MausBot on your phone", () => {
   };
   beforeEach(() => { devices = [OLD, NEW]; retired = true; bridgesOn(); });
 
-  it("shows once this computer's link ended and a paired phone has an older app: the phone, what to do, Open Phone & devices and Not now", async () => {
+  it("shows once this computer's link ended and a paired phone has an older app: the phone, what to do, Open Devices and Not now", async () => {
     const shown = await launch();
     expect(shown).toContain(TITLE); expect(shown).toContain('data-notice="phone-update"');
     for (const text of ["Ada&#x27;s iPhone has an older version of the MausBot app, which can no longer connect to this computer away from your Wi-Fi.",
       "Update the app on that phone, then open it once on the same Wi-Fi as this computer. If that doesn&#x27;t reconnect it, pair it again.",
-      "Open Phone &amp; devices", "Not now"]) expect(shown).toContain(text);
+      "Open Devices", "Not now"]) expect(shown).toContain(text);
     expect(shown).not.toContain("Work phone");
     expect(launchNotice()).toBe("phone-app-update");
   });
 
-  it("Open Phone & devices opens pairing in Settings, and the card is done for that phone", async () => {
+  it("Open Devices opens pairing in Settings, and the card is done for that phone", async () => {
     await launch();
-    tree().find(node => node.type === "button" && node.props.children === "Open Phone & devices")!.props.onClick(); await flush();
+    tree().find(node => node.type === "button" && node.props.children === "Open Devices")!.props.onClick(); await flush();
     expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "phone", phonePairing: true });
     expect(hints()).toContain("phone-app-update:0f8c2a41");
     expect(render()).toBe("");
@@ -1783,7 +1796,7 @@ describe("Update MausBot on your phone", () => {
     expect(await relaunch(), "a plain browser").not.toContain(TITLE);
   });
 
-  it("shows on a branded build too, as Settings → Phone & devices explains it there", async () => {
+  it("shows on a branded build too, as Settings → Devices explains it there", async () => {
     f.brand = "file";
     expect(await launch()).toContain(TITLE);
   });

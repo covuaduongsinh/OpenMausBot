@@ -15,10 +15,9 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { codexConfigMcp, codexConfigRunsServer, codexMcpDisableArgs, mountedMcpServerName } from "./codex-mcp-names.ts";
 
-import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
+import { stripWorkspaceCredentialEnv } from "../config.ts";
 import { laterStartup, openStartupModelCatalog, unconfirmedModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
-import { hostedWorkspaceConfigured } from "../enterprise.ts";
-import { cloudHomeConfigured } from "../cloud-home.ts";
+import { chatgptAccountDirectory, chatgptAccountHome, chatgptAccountSignsInByDevice } from "./codex-account-home.ts";
 import { serverVersion } from "../environment.ts";
 import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";
 import { chatgptPlanCodexArgs, PLAN_TOKEN_BRIDGE_ENV, planTokenRenewal, startPlanTokenBridge, type PlanTokenBridge } from "./codex-plan-token.ts";
@@ -42,14 +41,14 @@ import type {
   TextGenerationOptions,
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
-import { codexSelectedProviderArgs, decodeCodexSelection, OFFICIAL_CODEX_PROVIDER, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
+import { codexSelectedProviderArgs, codexThreadSelection, decodeCodexSelection, OFFICIAL_CODEX_PROVIDER, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 import { codexBackgroundProviderArgs, codexBackgroundRoute, runCodexBackgroundRoute, runCodexOneShot } from "./codex-background-text.ts";
 import { augmentedPath } from "../env-path.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { appendNative } from "./native.ts";
 import { answersAlone, permissionLaunchCwd, shellRequest } from "./permission-command.ts";
 import { commandSummary, toolDetailPreview } from "../tool-summary.ts";
-import { codexDeveloperInstructions, syncCodexInstructions } from "./codex-instructions.ts";
+import { codexDeveloperInstructions, codexSandboxNote, syncCodexInstructions } from "./codex-instructions.ts";
 import { volatileContextNote, withContextNote } from "./prompt-split.ts";
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { CodexDeviceAuthController } from "./codex-device-auth.ts"; import { messageItem } from "../harness/text-items.ts";
@@ -57,7 +56,7 @@ import { codexAccountEmail, codexHome } from "./codex-identity.ts";
 import { keepChatsOutOfCodexHistory, linkSharedCodexHome } from "./codex-shared-home.ts";
 import { mcpAppApprovalForm, mcpAppApprovalText, mcpElicitationDeclined, plainRecord } from "./codex-app-approval.ts";
 import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, codexProviderMismatch, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexPlanModelRefused, codexPlanUnsupportedInput, codexSignInRefused, codexUserError, codexUserFailure, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
-import { codexLoginCheck, readCodexLogin, storedCodexLogin } from "./codex-login.ts";
+import { codexTierOf } from "./codex-tier.ts"; import { codexLoginCheck, readCodexLogin, storedCodexLogin } from "./codex-login.ts";
 import { keyRejected, noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
 import { extractMcpImages } from "../mcp-tool-images.ts"; import { codexImageInputs, withoutInlineImages } from "./codex-images.ts";
@@ -65,7 +64,7 @@ import { parseProtocolAskQuestions, questionChoices } from "../../shared/ask-que
 import { codexQuestionReply, openAsyncQuestion, type CodexAsk } from "./codex-questions.ts";
 import { codexReleaseUpdate, codexUpdateCommand } from "./codex-update.ts";
 export { codexUpdateCommand };
-import { customApprovalParams, namedApprovalParams, permissionProfileUnsupported, withResolvedSandbox, type CodexApprovalParams } from "./codex-approval-config.ts"; import { CodexConnection, codexConfigDigest, codexContractDiff, codexLoginIdentity, codexSpawnContract, codexWarmSessions } from "./codex-warm.ts"; import { AGENTS_TOOL_TIMEOUT_SECONDS } from "./agents-tool-limit.ts"; import { COMPUTER_PROXY_TIMEOUT_MS } from "../harness-budget.ts";
+import { customApprovalParams, namedApprovalParams, permissionProfileUnsupported, withResolvedSandbox, type CodexApprovalParams } from "./codex-approval-config.ts"; import { CodexConnection, codexConfigDigest, codexContractDiff, codexIdentityInputs, codexOwnLogin, codexSpawnContract, codexWarmSessions, type CodexIdentityInputs } from "./codex-warm.ts"; import { codexCompactSession } from "./codex-compact.ts"; import { AGENTS_TOOL_TIMEOUT_SECONDS } from "./agents-tool-limit.ts"; import { COMPUTER_PROXY_TIMEOUT_MS } from "../harness-budget.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import { appMountFor, gateServer, mcpStdioServer } from "../mcp-gate-config.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
@@ -197,7 +196,7 @@ export function codexNativeIncomingLogMessage(
 
 export const CodexDriver: ProviderDriver<CodexConfig> = {
   driverKind: DRIVER_KIND,
-  metadata: { displayName: "Codex", supportsMultipleInstances: true },
+  metadata: { displayName: "Codex", supportsMultipleInstances: true, signInAccount: "ChatGPT" },
   install: {
     command: {
       darwin: "npm install -g @openai/codex",
@@ -216,11 +215,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     const { instanceId, config } = input;
     const routed = config.endpoint ?? config.managed;
     const routedProvider = config.endpoint ? "openmaus_endpoint" : "openmaus_company";
-    const plan = config.authMode === "chatgpt-plan";
-    const planUnavailable = plan && (hostedWorkspaceConfigured() || cloudHomeConfigured())
-      ? "ChatGPT plan sign-in for hosted Pro requires OpenAI's hosted-app approval. Use a Company model or API key until that integration is approved; the local desktop flow cannot be used here."
-      : undefined;
-    const planDirectory = join(DATA_DIR, "providers", "chatgpt-plan", createHash("sha256").update(instanceId).digest("hex"));
+    // Where the browser sign-in cannot call back, an added ChatGPT account is Codex's own login in a Codex home of its own.
+    const deviceHome = chatgptAccountSignsInByDevice(config) ? chatgptAccountHome(instanceId) : null;
+    const plan = config.authMode === "chatgpt-plan" && !deviceHome, planDirectory = chatgptAccountDirectory(instanceId);
     const childEnv = (): Record<string, string | undefined> => {
       const env: Record<string, string | undefined> = {
         ...process.env,
@@ -238,9 +235,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         env.OPENMAUSBOT_CODEX_API_KEY = input.environment.OPENMAUSBOT_CODEX_API_KEY;
         env.CODEX_HOME = input.environment.CODEX_HOME;
       }
-      if (plan) env.CODEX_HOME = join(planDirectory, "codex");
+      if (plan || deviceHome) { env.CODEX_HOME = join(planDirectory, "codex"); delete env.CODEX_SQLITE_HOME; }
       return env;
     };
+    // The person's Codex setup is linked in, its login stays its own; Codex refuses a CODEX_HOME that does not exist.
+    const prepareDeviceHome = () => { if (deviceHome) linkSharedCodexHome(codexHome({ ...process.env, ...input.environment }), deviceHome); };
+    try { prepareDeviceHome(); } catch {}
     const catalogEnv = childEnv();
     const planAuth = plan ? new ChatGptPlanAuthController({ directory: planDirectory }) : null;
     const planRenewal = planTokenRenewal(() => readCliVersion(catalogEnv));
@@ -256,7 +256,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const kept = preserveExisting && models.options.length > 0 ? models : null;
         if (!kept) models = { default: "", options: [] };
         try {
-          if (!planUnavailable && !planSigningOut && !disposed) {
+          if (!planSigningOut && !disposed) {
             const catalog = await planAuth.models();
             if (generation === planGeneration && !planSigningOut && !disposed && (!kept || catalog.options.length)) models = catalog;
           }
@@ -317,7 +317,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     const loginRejected = () => { const mark = loginMark(); return mark !== null && keyRejected(...mark); };
     const authentication = new CodexDeviceAuthController({
       cli: config.cli,
-      environment: childEnv,
+      environment: () => { prepareDeviceHome(); return childEnv(); },
       signInRejected: loginRejected,
       onAuthenticated: async () => { loginAccepted(); await refreshModels(); },
     });
@@ -352,7 +352,6 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (planAuth && (planSigningOut || generation !== planGeneration)) throw new Error("The ChatGPT account changed while this message was preparing. Select a connected account and send again.");
       };
       assertPlanCurrent();
-      if (planUnavailable) throw new Error(planUnavailable);
       const planToken = planAuth ? await planAuth.accessToken() : undefined;
       assertPlanCurrent();
       if (planAuth) {
@@ -370,6 +369,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         }
         linkSharedCodexHome(codexHome({ ...process.env, ...input.environment }), join(planDirectory, "codex"));
       }
+      prepareDeviceHome();
       if (config.endpoint) {
         if (!turn.model || !config.endpoint.models.includes(turn.model)) throw new Error("Select a model configured for this direct API endpoint.");
         if (!input.environment.OPENMAUSBOT_CODEX_API_KEY || !input.environment.CODEX_HOME) throw new Error("Direct API key or isolated Codex home is missing. Edit the endpoint in Settings.");
@@ -544,14 +544,14 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const commandCwd = permissionLaunchCwd(turn.cwd ?? homedir());
         // A plan login reaches its process through this turn's token or bridge, which end with the turn.
         const contract = plan ? null : codexSpawnContract({ cli: config.cli, args: appServerArgs, env, cwd: turn.cwd ?? homedir(), box: customBox,
-          login: codexLoginIdentity(ownLogin ? storedCodexLogin(env) : null), thread: { model: turn.model ?? null, approvalMode, ...selectionConfig } });
+          login: codexOwnLogin(ownLogin, env), thread: { model: turn.model ?? null, approvalMode, ...selectionConfig } });
         const reused = contract && attempt === 0 ? warm.take(threadId, contract, typeof turn.resumeCursor === "string" ? turn.resumeCursor : null) : null;
         const releaseSlot = reused ? () => {} : tryCodexLaunchSlot() ?? await waitForLaunchSlot(attempt);
         if (!releaseSlot) return;
         const connection = reused?.connection ?? new CodexConnection(spawnHoldingSlot(releaseSlot, () => spawnCli(...codexLaunch(config.cli, appServerArgs), {
           cwd: turn.cwd ?? homedir(),
           env,
-          stdio: ["pipe", "pipe", "pipe"], ...customBox,
+          stdio: ["pipe", "pipe", "pipe"], ...(authBridge ? { box: { ...customBox.box, rw: [authBridge.socketPath] } } : customBox),
         }, "bot")));
         const child = connection.child;
 
@@ -561,7 +561,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       let startingNativeTurn = false;
       const earlyNotifications: any[] = [];
       const mcpStartup = reused ? null : mcpStartupTracker(child);
-      let mcpFailed = false, keepable: { configDigest: string; cwd: string; carried: { initialized: any; approvalParams: CodexApprovalParams; rolloutPath: unknown } } | null = null;
+      let mcpFailed = false, keepable: { configDigest: string; cwd: string; identity: CodexIdentityInputs; provider: string | null; model: string | null; carried: { initialized: any; approvalParams: CodexApprovalParams; rolloutPath: unknown } } | null = null;
       const state = {
         settled: false,
         lastError: "",
@@ -1236,25 +1236,15 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           ? turn.systemStable
           : null;
         const promptSplit = stableInstructions !== null;
-        const developerInstructions = codexDeveloperInstructions(
-          effectiveConfig,
-          stableInstructions ?? turn.system ?? "",
-        );
-        let approvalParams: CodexApprovalParams;
-        if (approvalMode === "custom") {
-          // Omitting these on a resumed thread would keep the previous named mode.
-          approvalParams = customApprovalParams(effectiveConfig);
-        } else {
-          approvalParams = namedApprovalParams(approvalMode);
-        }
+        // Omitting these on a resumed thread would keep the previous named mode.
+        let approvalParams: CodexApprovalParams = approvalMode === "custom" ? customApprovalParams(effectiveConfig) : namedApprovalParams(approvalMode);
+        const instructionsFor = (params: CodexApprovalParams) => codexDeveloperInstructions(effectiveConfig, stableInstructions ?? turn.system ?? "", turn.guestConfined ? "" : codexSandboxNote(params));
+        // Validate effectiveConfig upfront so invalid native rules fail before thread creation/reuse.
+        instructionsFor(approvalParams);
         // Codex's `never` means "do not ask to escalate", not "grant every requested permission":
         // only Full may synthesize approvals.
         autoAcceptPermissions = approvalMode === "full";
-        const selection: { model?: string | null; modelProvider: string | null; serviceTier?: string } = routed
-          ? { model: turn.model, modelProvider: routedProvider }
-          : config.authMode === "chatgpt-plan"
-            ? { model: turn.model, modelProvider: "openai_chatgpt_plan" }
-            : decodeCodexSelection(turn.model);
+        const selection = codexThreadSelection({ routedProvider: routed ? routedProvider : undefined, plan }, turn.model);
         const cursor = !droppedUnsupportedSession && typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
         let startedModel: string | null = null;
         // The plan refused the dropped session before anything ran, so replaying the chat repeats no side effects.
@@ -1266,7 +1256,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           const resumeThread = () => request("thread/resume", {
             ...selectionConfig,
             threadId: cursor,
-            developerInstructions,
+            developerInstructions: instructionsFor(approvalParams),
             model: selection.model,
             ...(selection.modelProvider ? { modelProvider: selection.modelProvider } : {}),
             ...approvalParams.thread,
@@ -1306,13 +1296,13 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (!codexThreadId) {
           const startThread = () => request("thread/start", {
               ...selectionConfig,
-              developerInstructions,
+              developerInstructions: instructionsFor(approvalParams),
               cwd: turn.cwd ?? homedir(),
               model: selection.model,
               ...(selection.modelProvider ? { modelProvider: selection.modelProvider } : {}),
               ...approvalParams.thread,
               ...(turn.guestConfined ? { environments: [] } : {}),
-              ephemeral: false,
+              ephemeral: turn.ephemeral === true,
             });
           let started;
           try {
@@ -1331,7 +1321,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const { deliverVolatile, hadVolatile, commitVolatile } = await syncCodexInstructions(
           threadId,
           codexThreadId,
-          developerInstructions,
+          instructionsFor(approvalParams),
           promptSplit ? turn.systemVolatile ?? "" : "",
           resumedNativeThread,
           request,
@@ -1351,7 +1341,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         ];
         const startTurn = () => {
           promptSubmitted = true;
-          startingNativeTurn = true; keepable = { configDigest, cwd: turn.cwd ?? homedir(), carried: { initialized, approvalParams, rolloutPath: rolloutAt?.path } };
+          startingNativeTurn = true; keepable = { configDigest, cwd: turn.cwd ?? homedir(), identity: codexIdentityInputs(config.cli, env, ownLogin), provider: selection.modelProvider, model: turn.model && selection.serviceTier ? codexTierOf(turn.model)?.model ?? turn.model : turn.model ?? null, carried: { initialized, approvalParams, rolloutPath: rolloutAt?.path } };
           return request("turn/start", {
             threadId: codexThreadId,
             input: turnInput,
@@ -1407,7 +1397,6 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
 
   const readCliVersion = cliVersionProbe(config.cli);
   const snapshot = async (): Promise<ProviderSnapshot> => {
-    if (planUnavailable) return { state: "unavailable", authenticated: false, chatgptPlan: true, reason: planUnavailable, authenticationUnavailableReason: planUnavailable };
     const env = childEnv();
     const probe = await readCliVersion(env);
     if (!("version" in probe)) return { state: "unavailable", reason: probe.reason, ...(plan ? { chatgptPlan: true } : {}) };
@@ -1442,7 +1431,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
   const generateMemoryText = async (prompt: string, options: TextGenerationOptions = {}): Promise<string> => {
     if (startupModelRefresh) await startupModelRefresh;
     if (disposed) throw new Error("This provider was removed.");
-    if (planUnavailable) throw new Error(planUnavailable);
+    prepareDeviceHome();
     const env = childEnv();
     let providerArgs: string[] = [];
     let authBridge: PlanTokenBridge | null = null;
@@ -1502,7 +1491,6 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     ...(plan ? { authenticationMethod: "browser-pkce" as const } : {}),
     ...(!config.endpoint ? {
       startAuthentication: async () => {
-        if (planUnavailable) throw new Error(planUnavailable);
         if (planSigningOut || disposed) throw new Error("This account is being disconnected. Wait before signing in again.");
         if (planAuth) planGeneration++; // a new login may replace the account before its status is polled
         return (planAuth ?? authentication).start();
@@ -1556,6 +1544,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         strictResume: true, nativeCompaction: true,
       },
       sendTurn,
+      compactSession: codexCompactSession({ instanceId, warm, active, turnId: newId, providerOf: (model) => codexThreadSelection({ routedProvider: routed ? routedProvider : undefined, plan }, model).modelProvider,
+        refusal: () => disposed ? "this provider was removed" : planSigningOut ? "this account is being disconnected" : null }),
       interruptTurn: async (threadId) => {
         await active.get(threadId)?.stop();
       },
